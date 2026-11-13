@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "mock": "node scripts/mock-api.mjs",
-    "samples": "mkdir -p src/assets/invoices && cp ../backend/data/invoices/*.pdf src/assets/invoices/"
+    "samples": "rm -rf src/assets/invoices && mkdir -p src/assets/invoices && cp ../backend/data/invoices/*.pdf src/assets/invoices/"
   },
   "dependencies": {
     "clsx": "2.1.1",
