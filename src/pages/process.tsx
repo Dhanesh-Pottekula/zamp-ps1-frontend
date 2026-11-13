@@ -9,6 +9,8 @@ import { ModeBadge } from "@/components/mode-badge";
 import { ErrorNote } from "@/components/error-note";
 import { sampleDocument } from "@/lib/samples";
 import { useDocument } from "@/lib/use-document";
+import { Badge } from "@/components/ui/badge";
+import { HIGHLIGHTS, highlightsOf, type Highlight } from "@/lib/highlights";
 import { cn } from "@/lib/utils";
 
 const ACCEPTED_TYPES = ["application/pdf", "image/png", "image/jpeg"];
@@ -27,6 +29,7 @@ export function ProcessPage() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [samples, setSamples] = useState<SampleRow[] | null>(null);
   const [preview, setPreview] = useState<SampleRow | null>(null);
+  const [focus, setFocus] = useState<Highlight | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -123,8 +126,22 @@ export function ProcessPage() {
         )}
         {!samples && !loadError && <CardContent className="text-sm text-slate-500">Loading scenario…</CardContent>}
         {samples && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 px-4 pb-3 text-xs text-slate-500">
+            <span className="mr-1">Highlight approved cases:</span>
+            <FocusButton active={focus === null} onClick={() => setFocus(null)}>
+              All samples
+            </FocusButton>
+            {(Object.keys(HIGHLIGHTS) as Highlight[]).map((key) => (
+              <FocusButton key={key} active={focus === key} onClick={() => setFocus(focus === key ? null : key)} title={HIGHLIGHTS[key].hint}>
+                {HIGHLIGHTS[key].label}
+                <span className="num text-[11px] opacity-70">{samples.filter((s) => highlightsOf(s.id).includes(key)).length}</span>
+              </FocusButton>
+            ))}
+          </div>
+        )}
+        {samples && (
           <ol className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {samples.map((sample) => (
+            {samples.filter((sample) => focus === null || highlightsOf(sample.id).includes(focus)).map((sample) => (
               <SampleItem
                 key={sample.id}
                 sample={sample}
@@ -156,9 +173,15 @@ const MISSING_NOTE = "Preview not available for this sample.";
 function SampleItem({ sample, busy, disabled, onRun, onPreview }: SampleItemProps) {
   const matched = sample.result !== null && sample.result === sample.outcome;
   const invoice = useDocument(sampleDocument(sample.id));
+  const highlights = highlightsOf(sample.id);
 
   return (
-    <li className="flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <li
+      className={cn(
+        "flex flex-col overflow-hidden rounded-lg border bg-white",
+        highlights.length > 0 ? "border-sky-300 ring-2 ring-sky-200" : "border-slate-200",
+      )}
+    >
       <div className="relative h-56 overflow-hidden border-b border-slate-200 bg-slate-50">
         <p className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-slate-400">
           {invoice === "missing" ? MISSING_NOTE : "Loading preview…"}
@@ -201,6 +224,15 @@ function SampleItem({ sample, busy, disabled, onRun, onPreview }: SampleItemProp
             <code className="font-mono text-[11px] text-slate-500">{sample.id}</code>
           </div>
         </div>
+        {highlights.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {highlights.map((key) => (
+              <Badge key={key} tone="blue" title={HIGHLIGHTS[key].hint}>
+                {HIGHLIGHTS[key].label}
+              </Badge>
+            ))}
+          </div>
+        )}
         <p className="flex-1 text-[13px] leading-snug text-slate-600">{sample.expect}</p>
         <div className="space-y-1 text-xs text-slate-500">
           <div className="flex items-center gap-1.5">
@@ -221,6 +253,33 @@ function SampleItem({ sample, busy, disabled, onRun, onPreview }: SampleItemProp
         </Button>
       </div>
     </li>
+  );
+}
+
+function FocusButton({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1 rounded px-2 py-1 font-medium ring-1 ring-inset",
+        active ? "bg-sky-600 text-white ring-sky-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
