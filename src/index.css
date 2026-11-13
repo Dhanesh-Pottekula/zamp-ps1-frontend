@@ -16,3 +16,43 @@ body {
 .num {
   font-variant-numeric: tabular-nums;
 }
+
+/* An indeterminate bar for a stage that is in progress: the pipeline reports no percentage, so nothing is implied. */
+@keyframes stage-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.stage-sweep::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inline-size: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--color-sky-500), transparent);
+  animation: stage-sweep 1.4s ease-in-out infinite;
+}
+
+/* The three dots next to "thinking"; each waits its turn. */
+@keyframes think-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+.think-dot {
+  animation: think-dot 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-sweep::after,
+  .think-dot {
+    animation: none;
+  }
+  .stage-sweep::after {
+    inline-size: 100%;
+    opacity: 0.4;
+  }
+  .think-dot {
+    opacity: 0.6;
+  }
+}

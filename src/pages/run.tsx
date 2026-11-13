@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { useParams, Link } from "react-router";
-import { ArrowLeft, CircleCheck, CircleDashed, CircleMinus, CircleX, ExternalLink, FileText, Loader2, Unplug } from "lucide-react";
-import { STEP_ORDER, type FindingRow, type Outcome, type StepName, type StepRow } from "@/lib/api";
+import { ArrowLeft, CircleCheck, CircleDashed, CircleMinus, CircleX, ExternalLink, FileText, Loader2, Sparkles, Unplug } from "lucide-react";
+import { STEP_ORDER, type FindingRow, type Outcome, type RunMode, type StepName, type StepRow } from "@/lib/api";
 import { duration, OUTCOME_LABEL, runLabel, timestamp, tokenTotal } from "@/lib/format";
 import { bundledSample } from "@/lib/samples";
 import { useDocument } from "@/lib/use-document";
 import { useRun } from "@/lib/use-run";
+import { useElapsed } from "@/lib/use-elapsed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible } from "@/components/ui/collapsible";
@@ -74,6 +75,13 @@ export function RunPage() {
   const facts: RunFacts = { outcome, summary, reasons };
   // Runs stored before the bank stage existed have no bank step; show only the stages a finished run went through.
   const shown = STEP_ORDER.filter((name) => name !== "bank" || steps.bank !== undefined || !finished);
+  // The backend only publishes a stage's "running" event, it never stores it, so a page that opens or reloads
+  // mid-run never receives one. The pipeline walks STEP_ORDER in order, so the first stage with no stored row is
+  // the one in progress; deriving it here keeps the indicator right for late subscribers and for polling.
+  const activeIndex = finished ? -1 : shown.findIndex((name) => steps[name] === undefined || steps[name]?.state === "running");
+  const activeName = activeIndex === -1 ? null : shown[activeIndex];
+  const settled = shown.filter((name) => steps[name] !== undefined && steps[name]?.state !== "running").length;
+  const runMs = useElapsed(detail?.at, !finished);
 
   const backLink = (
     <Link to="/dashboard" className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900">
@@ -108,19 +116,49 @@ export function RunPage() {
               ) : (
                 <Badge tone="blue">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  Processing
+                  {activeName ? STEP_LABEL[activeName] : "Processing"}
                 </Badge>
               )}
             </div>
-            {!finished && <p className="text-sm text-slate-700">Checks are running. Results appear step by step.</p>}
+            {!finished && (
+              <p className="text-sm text-slate-700">
+                {activeName ? (
+                  <>
+                    <span className="num font-medium">
+                      Step {activeIndex + 1} of {shown.length}
+                    </span>{" "}
+                    · {STEP_HINT[activeName]}
+                  </>
+                ) : (
+                  "Checks are running. Results appear step by step."
+                )}
+              </p>
+            )}
           </div>
           <dl className="grid grid-cols-2 gap-x-5 gap-y-1 text-xs sm:grid-cols-4">
             <HeaderFact label="Mode">{detail ? <ModeBadge mode={detail.mode} /> : "—"}</HeaderFact>
-            <HeaderFact label="Duration">{duration(detail?.ms)}</HeaderFact>
+            <HeaderFact label="Duration">{finished && detail?.ms != null ? duration(detail.ms) : runMs === null ? duration(detail?.ms) : duration(Math.round(runMs / 100) * 100)}</HeaderFact>
             <HeaderFact label="Started">{detail ? timestamp(detail.at) : "—"}</HeaderFact>
             <HeaderFact label="Tokens">{tokenTotal(detail?.tokens ?? null)}</HeaderFact>
           </dl>
         </div>
+        {!finished && (
+          <div
+            className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={shown.length}
+            aria-valuenow={settled}
+            aria-label={activeName ? `Step ${activeIndex + 1} of ${shown.length}: ${STEP_LABEL[activeName]}` : "Processing"}
+          >
+            <div
+              className="relative h-full rounded-full bg-sky-500 transition-[width] duration-500 ease-out"
+              style={{ width: `${Math.max(4, (settled / shown.length) * 100)}%` }}
+            >
+              <span className="absolute inset-0 animate-pulse rounded-full bg-sky-300/60 motion-reduce:animate-none" aria-hidden />
+            </div>
+          </div>
+        )}
         {degraded && !finished && (
           <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-500">
             <Unplug className="h-3.5 w-3.5" />
@@ -154,7 +192,8 @@ export function RunPage() {
           <ol className="px-4 py-2">
             {shown.map((name, index) => {
               const step = steps[name];
-              const view: View = step ? step.state : finished ? "not_run" : "pending";
+              const active = index === activeIndex;
+              const view: View = active ? "running" : step ? step.state : finished ? "not_run" : "pending";
               return (
                 <TimelineItem
                   key={name}
@@ -165,7 +204,7 @@ export function RunPage() {
                   last={index === shown.length - 1}
                   currency={currency}
                   run={facts}
-                  manual={detail?.mode === "manual"}
+                  mode={detail?.mode ?? null}
                 />
               );
             })}
@@ -254,12 +293,54 @@ const VIEW_BADGE: Record<View, { label: string; tone: "neutral" | "green" | "amb
 
 function StateIcon({ view, worst }: { view: View; worst: FindingRow["level"] | null }) {
   const base = "relative z-[1] h-5 w-5 rounded-full bg-white";
-  if (view === "running") return <Loader2 className={cn(base, "animate-spin text-sky-600")} />;
+  if (view === "running") {
+    return (
+      <span className="relative z-[1] flex h-5 w-5 shrink-0 items-center justify-center">
+        <span className="absolute inline-flex h-5 w-5 animate-ping rounded-full bg-sky-400/60 motion-reduce:hidden" aria-hidden />
+        <Loader2 className={cn(base, "animate-spin text-sky-600")} />
+      </span>
+    );
+  }
   if (view === "failed") return <CircleX className={cn(base, "text-red-600")} />;
   if (view === "skipped") return <CircleMinus className={cn(base, "text-slate-400")} />;
   if (view === "pending" || view === "not_run") return <CircleDashed className={cn(base, "text-slate-300")} />;
   const tone = worst === "block" ? "text-red-600" : worst === "warn" ? "text-amber-500" : "text-emerald-600";
   return <CircleCheck className={cn(base, tone)} />;
+}
+
+/**
+ * What is happening on the stage in progress.
+ *
+ * The pipeline reports no percentage for a stage, so the bar is indeterminate: it says "in progress" and claims
+ * nothing about how far along it is. Extraction is the only stage that waits on the model, and only when a model
+ * was actually called, so the thinking line is gated on the run's mode rather than shown everywhere.
+ */
+function ActiveStage({ name, mode }: { name: StepName; mode: RunMode | null }) {
+  const thinking = name === "extraction" && (mode === "live" || mode === "recorded");
+
+  return (
+    <div className="space-y-2">
+      <div className="stage-sweep relative h-1 overflow-hidden rounded-full bg-sky-100" aria-hidden />
+      {thinking && (
+        <div className="flex items-center gap-2 rounded-md bg-white/70 px-2.5 py-1.5 text-xs text-sky-900 ring-1 ring-sky-200 ring-inset">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-sky-600" />
+          <span className="font-medium">{mode === "recorded" ? "Replaying the recorded reading" : "The model is reading the document"}</span>
+          <span className="flex items-center gap-0.5" aria-hidden>
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="think-dot h-1 w-1 rounded-full bg-sky-600"
+                style={{ animationDelay: `${dot * 0.18}s` }}
+              />
+            ))}
+          </span>
+          <span className="text-sky-700/70">
+            {mode === "recorded" ? "no request is sent in recorded mode" : "usually the longest stage"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface TimelineItemProps {
@@ -270,10 +351,12 @@ interface TimelineItemProps {
   last: boolean;
   currency: string | null;
   run: RunFacts;
-  manual: boolean;
+  mode: RunMode | null;
 }
 
-function TimelineItem({ name, index, step, view, last, currency, run, manual }: TimelineItemProps) {
+function TimelineItem({ name, index, step, view, last, currency, run, mode }: TimelineItemProps) {
+  const manual = mode === "manual";
+  const running = view === "running";
   const findings = step?.findings ?? [];
   const worst = findings.some((item) => item.level === "block") ? "block" : findings.some((item) => item.level === "warn") ? "warn" : findings.length ? "info" : null;
   const badge = VIEW_BADGE[view];
@@ -282,17 +365,29 @@ function TimelineItem({ name, index, step, view, last, currency, run, manual }: 
   const quiet = view === "pending" || view === "not_run" || view === "skipped";
 
   return (
-    <li className="relative flex gap-3 py-2.5">
-      {!last && <span className="absolute top-8 bottom-0 left-[9.5px] w-px bg-slate-200" aria-hidden />}
+    <li
+      className={cn(
+        "relative flex gap-3 py-2.5",
+        running && "-mx-2 rounded-lg bg-sky-50/80 px-2 ring-1 ring-sky-200 ring-inset",
+      )}
+      aria-current={running ? "step" : undefined}
+    >
+      {!last && <span className={cn("absolute top-8 bottom-0 w-px bg-slate-200", running ? "left-[17.5px]" : "left-[9.5px]")} aria-hidden />}
       <StateIcon view={view} worst={worst} />
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="num w-4 text-xs text-slate-400">{index + 1}</span>
-          <span className={cn("text-sm font-medium", quiet ? "text-slate-500" : "text-slate-900")}>{manual && name === "extraction" ? "Extraction (manual entry)" : STEP_LABEL[name]}</span>
-          <Badge tone={badge.tone}>{badge.label}</Badge>
+          <span className={cn("text-sm font-medium", running ? "text-sky-900" : quiet ? "text-slate-500" : "text-slate-900")}>
+            {manual && name === "extraction" ? "Extraction (manual entry)" : STEP_LABEL[name]}
+          </span>
+          <Badge tone={badge.tone}>
+            {running && <Loader2 className="h-3 w-3 animate-spin" />}
+            {badge.label}
+          </Badge>
           {step && view !== "running" && view !== "skipped" && step.ms !== null && <span className="num text-xs text-slate-500">{duration(step.ms)}</span>}
-          <span className="hidden text-xs text-slate-400 md:inline">{STEP_HINT[name]}</span>
+          <span className={cn("hidden text-xs md:inline", running ? "text-sky-700" : "text-slate-400")}>{STEP_HINT[name]}</span>
         </div>
+        {running && <ActiveStage name={name} mode={mode} />}
         {skipReason && <p className="text-[13px] text-slate-500">{skipReason}</p>}
         {findings.length > 0 && <FindingList findings={findings} />}
         {showEvidence && (
